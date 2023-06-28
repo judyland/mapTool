@@ -4,7 +4,6 @@ import random
 import geopandas as gpd
 import plotly
 import numpy
-import numpy as np
 from geopandas.tools import overlay
 from geopandas import GeoDataFrame
 from geopandas import points_from_xy
@@ -41,58 +40,6 @@ class MplWidget(QWidget):
 
         self.dataframes = []
         self.canvas.draw()
-        self.colors = []
-
-    def drawLayer (self, df) :
-        geom = points_from_xy(df['long'], df['lat'])
-        self.gdf = gpd.GeoDataFrame(copy.deepcopy(df), geometry=geom)
-
-        colors = ['red', 'blue', 'magenta', 'green']
-        if 'route' in df.columns:
-            if 'r/d' in df.columns:
-                gdf_f = self.gdf[self.gdf["r/d"] == "r"]
-            else:
-                gdf_f = self.gdf
-            lines_array = gdf_f.groupby(['route'])
-            groups = lines_array.indices
-
-            i = 0
-
-            for gr in groups:
-                route = lines_array.get_group(gr)
-                j = i % 4
-                print('route', route)
-                v = route.iat[0, 3]
-                #print(v)
-                c = route.iat[0, 6]
-                #print(v)
-                #print(colors)
-                #c = self.colors[v.lower()].color()
-
-                #print ('C', self.c)
-                res = route.plot.line(ax=self.canvas.axes, x='long', y='lat',
-                                      marker='o', color=c, markerfacecolor='none',
-                                      gid=df.route, picker=True, label=v)
-                handles, labels = res.get_legend_handles_labels()
-                res.legend(handles,set(labels))
-                print(v)
-                print(labels)
-                # reverse the order
-                #route.legend(handles[::-1], labels[::-1])
-
-                i += 1
-
-        else:
-            self.gdf.plot(ax=self.canvas.axes, color='red', marker='*')
-
-
-        ls = self.gdf['geometry'].geom_type
-        if 'Point' == list(ls)[0]:
-            for x, y, label in zip (self.gdf.geometry.x, self.gdf.geometry.y, self.gdf.name) :
-                self.canvas.axes.annotate (label, xy= (x, y), xytext=(3, 3),textcoords="offset points")
-
-
-        self.canvas.draw()
 
 
     def addLayer (self, fname, color):
@@ -107,14 +54,35 @@ class MplWidget(QWidget):
             df = pd.read_json(fname)
 
         self.dataframes.append(df)
-        #c = numpy.random.random(3)
-        self.drawLayer(df)
+        geom = points_from_xy(df['long'], df['lat'])
+        self.gdf = gpd.GeoDataFrame(copy.deepcopy(df), geometry=geom)
+
+        if 'route' in df.columns:
+            if 'r/d' in df.columns:
+                gdf_f = self.gdf[self.gdf["r/d"] == "r"]
+            else:
+                gdf_f = self.gdf
+            lines_array = gdf_f.groupby(['route'])
+            groups = lines_array.indices
+            for gr in groups:
+                route = lines_array.get_group(gr)
+                route.insert(1, 'path', 0)
+                route.plot.line(ax=self.canvas.axes, c=numpy.random.random(3),x='long', y='lat')
+                self.gdf.plot(ax=self.canvas.axes, color='red', marker='o')
+        else:
+            self.gdf.plot(ax=self.canvas.axes, color='red', marker='*')
 
 
-current_df = pd.DataFrame({'r/d':[], 'route':[], 'order':[], 'name': [], 'long': [], 'lat':[], 'color':[]})
+        ls = self.gdf['geometry'].geom_type
+        if 'Point' == list(ls)[0]:
+            for x, y, label in zip (self.gdf.geometry.x, self.gdf.geometry.y, self.gdf.name) :
+                self.canvas.axes.annotate (label, xy= (x, y), xytext=(3, 3),textcoords="offset points")
+        self.canvas.draw()
+
+
+current_df = pd.DataFrame({'r/d':[], 'route':[], 'order':[], 'name': [], 'long': [], 'lat':[]})
 myFigure = Figure()
-legends = []
-pictures = []
+
 
 class ObjectsModel(QAbstractTableModel):
     def __init__(self, parent=None) :
@@ -134,11 +102,7 @@ class ObjectsModel(QAbstractTableModel):
 
     def data(self, modelIndex, role=None):
         if role == Qt.ItemDataRole.DisplayRole and modelIndex.row() < len(current_df):
-            v = current_df.iat[modelIndex.row(), modelIndex.column()]
-            if isinstance(v, (float)):
-                return f'{v:.4f}'
-            else:
-                return str(v)
+            return str(current_df.iat[modelIndex.row(), modelIndex.column()])
 
     def flags(self, index):
         if not index.isValid():
@@ -165,21 +129,6 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self.route = 0
         self.order = 0
         self.cid = 0
-        self.mplw.canvas.mpl_connect('close_event', self.close)
-
-    def close(self):
-        print ('close')
-
-        lines = self.mplw.canvas.axes.lines
-        config = ConfigParser()
-        config.read('maper.ini')
-        for line in self.mplw.canvas.axes.lines:
-            c = line.get_color()
-            config['COLORS'][line._label] = str(c)
-
-        with open('maper.ini', 'w') as configfile:
-             config.write(configfile)
-        exit()
 
     def connectSignalsSlots (self):
         self.actionOpen_Layer.triggered.connect (self.openMap)
@@ -250,17 +199,12 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self.labelLayer.setText (self.currentFile)
         global current_df
         df =  self.mplw.dataframes [n]
-        self.setCurrentFrame (df)
-
-
-    def setCurrentFrame (self, df):
-        global current_df
         type = 'n'
         if 'route' not in df.columns:
             type = 'd'
         elif 'r/d' not in df.columns:
             type = 'r'
-        current_df = pd.DataFrame({'r/d':[], 'route':[], 'order':[], 'name': [], 'long': [], 'lat':[], 'color':{}})
+        current_df = pd.DataFrame({'r/d':[], 'route':[], 'order':[], 'name': [], 'long': [], 'lat':[]})
         current_df = current_df.merge(df, how = 'outer').fillna(value = {'r/d':type, 'route':'0', 'order':'0'})
         n = self.tableViewEditor.model().rowCount(QModelIndex())
         self.tableViewEditor.model().beginRemoveRows (QModelIndex(),   0,   n)
@@ -271,9 +215,7 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self.tableViewEditor.model().endInsertRows()
         self.tabWidget.setCurrentIndex(1)
         self.order = n
-        print('N =', n)
         self.route = current_df.iloc[n-1]['route']
-
 
     def removeLayer (self):
         n = self.listWidget.currentRow()
@@ -292,17 +234,14 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self.displayMaps ()
 
 
-    def addNode(self, x, y, type, name):
+    def addNode(self, x, y, type):
         n = len(current_df)
-        #print(current_df)
-        print(type, self.route, self.order, name, x, y, self.c)
         self.tableViewEditor.model().beginInsertRows(QModelIndex(), n, n)
         current_df.loc[len(current_df.index)] = [type, self.route, self.order,
-                                                 name, x, y, self.c]
+                                                 'Node-'+str(self.route)+'-'+str(self.order),
+                                                 f'{x:.4f}',  f'{y:.4f}']
         self.tableViewEditor.model().endInsertRows()
         self.order += 1
-
-        self.mplw.drawLayer(current_df)
 
     def addPoint (self, set):
         if self.cid > 0:
@@ -315,118 +254,46 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         ix, iy = event.xdata, event.ydata
         self.mplw.canvas.axes.plot(ix, iy, '+', color='red', markersize=10)
         self.mplw.canvas.draw()
-        #self.mplw.canvas.draw()
+        self.mplw.canvas.draw()
         self.mplw.canvas.setCursor (Qt.CursorShape.CrossCursor)
         n = len (current_df)
-        self.addNode(ix, iy, 'd', 'Point-'+str(self.route)+'.'+str(self.order), 'red')
+        self.addNode(ix, iy, 'd')
 
     def addLine(self, set):  # starting line
         if self.cid > 0:
             self.mplw.canvas.mpl_disconnect (self.cid)
 
         self.x_start, self.y_start = 0, 0
-        self.cid= self.mplw.canvas.mpl_connect('pick_event', self.onpick)
         self.cid= self.mplw.canvas.mpl_connect('button_press_event', self.getLineStart)
-        self.first_node = True
         self.mplw.canvas.setCursor(Qt.CursorShape.UpArrowCursor)
 
         self.mplw.canvas.draw()
         self.route += 1
-        self.picked = False
-
-    def onpick(self, event):
-        self.thisline = event.artist
-        self.ind = event. ind[0]
-        pickx = self.thisline.get_xdata()
-        picky = self.thisline.get_ydata()
-        df, route = self.thisline.get_gid ()
-
-        global current_df
-        self.setCurrentFrame (df)
-        self.row = route.loc [route.index[self.ind], 'order']
-        route_ind = route.loc [route.index[self.ind], 'route']
-        index = self.tableViewEditor.model().index(self.row, 3, QModelIndex())
-        self.tableViewEditor.setCurrentIndex(index)
-
-
-        print ('row', self.row)
-        r = np.sqrt((pickx[self.ind] - event.mouseevent.xdata)**2 +
-                    (picky[self.ind] - event.mouseevent.ydata)**2)
-
-        if r < 0.005 :
-            print('point', self.ind)
-        else:
-            self.tableViewEditor.model().beginInsertRows(QModelIndex(), self.row, self.row)
-            current_df.loc[self.row + 0.5] = ['r', route_ind, self.order,'',
-                                              picky[self.ind], pickx[self.ind]]
-            current_df = current_df.reset_index(drop=True)
-            self.tableViewEditor.model().endInsertRows()
-            current_df['order'] = np.arange(len(current_df))
-            xdata, ydata = self.thisline.get_data()
-            xdata = np.insert(xdata, self.ind + 1, event.mouseevent.xdata)
-            ydata = np.insert(ydata, self.ind + 1, event.mouseevent.ydata)
-            self.thisline.set_data(xdata, ydata)
-            self.ind += 1
-            self.thisline.set_gid([current_df, route])
-        self.cid_move = self.mplw.canvas.mpl_connect('motion_notify_event', self.movePoint)
-        self.picked = True
-        print('onpick', self.picked)
-
-
-
-
-    def movePoint(self, event): # motion event
-        x, y = event.xdata, event.ydata
-        xdata, ydata = self.thisline.get_data()
-        xdata[self.ind] = event.xdata
-        ydata[self.ind] = event.ydata
-        self.thisline.set_data(xdata, ydata)
-        self.mplw.canvas.draw()
-        current_df.loc[self.row, 'long'] = event.xdata
-        current_df.loc[self.row, 'lat']  = event.ydata
-
 
     def getLineStart (self, event):  # press event
-        self.cid_release = self.mplw.canvas.mpl_connect('button_release_event', self.stopLine)
-        print('getLneStart', self.picked)
-
         if event.button == 3:
             self.line_add =  False
-            if self.cid:
-                self.mplw.canvas.mpl_disconnect(self.cid)
-                self.mplw.canvas.mpl_disconnect(self.cid_move)
-                #self.mplw.canvas.axes.legend(np.unique(self.route))
-            self.mplw.canvas.unsetCursor()
-            self.mplw.drawLayer(current_df)
-            return
-        if self.picked:
             return
 
         self.x_start, self.y_start = event.xdata, event.ydata
-        self.mplw.canvas.axes.plot(self.x_start, self.y_start, 'o', color='green', markersize=7)
+        self.mplw.canvas.axes.plot(self.x_start, self.y_start, 'o', c=numpy.random.random(3), markersize=7)
         self.mplw.canvas.draw()
         self.line_add = True
+        self.cid_release = self.mplw.canvas.mpl_connect('button_release_event', self.stopLine)
         self.mplw.canvas.mpl_connect('motion_notify_event', self.getLineEnd)
         self.prev, = self.mplw.canvas.axes.plot([self.x_start, self.x_start],
                                                 [self.y_start, self.y_start],
-                                                color='green')
+                                                c=numpy.random.random(3))
         self.mplw.canvas.setCursor(Qt.CursorShape.UpArrowCursor)
         n = len(current_df)
-        name = ' '
-        if self.first_node:
-            name = self.route
-            self.c = set(numpy.random.random(3))
-            #name = 'Route-' + str(self.route)
-        self.addNode(self.x_start, self.y_start, 'r', name)
-        self.first_node = False
+        self.addNode(self.x_start, self.y_start, 'r')
 
     def getLineEnd(self, event):  # move event
         if self.line_add :
             self.prev.remove()
             x, y = event.xdata, event.ydata
-            self.prev, = self.mplw.canvas.axes.plot([self.x_start, x], [self.y_start, y], color=self.c)
+            self.prev, = self.mplw.canvas.axes.plot([self.x_start, x], [self.y_start, y], c=numpy.random.random(3))
             self.mplw.canvas.draw()
-
 
     def stopLine (self, event):  # release event
         x, y = event.xdata, event.ydata
@@ -436,13 +303,6 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self.mplw.canvas.mpl_disconnect (self.cid_release)
         self.mplw.canvas.draw()
         self.mplw.canvas.setCursor(Qt.CursorShape.UpArrowCursor)
-        print('released', self.picked)
-        if self.picked:
-            if self.cid:
-                self.mplw.canvas.mpl_disconnect(self.cid)
-            if self.cid_move:
-                self.mplw.canvas.mpl_disconnect(self.cid_move)
-            self.mplw.canvas.unsetCursor()
 
     def displayMaps (self):
         config = ConfigParser()
@@ -454,10 +314,8 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
         self. flist=fliststr.splitlines()
         self.listWidget.clear()
         self.listWidget.addItems (self.flist)
-        colors = ['red', 'blue', 'green']
+        colors= ['black','green', 'blue', 'red','gray','yellow']
         self.mplw.canvas.axes.clear()
-        #self.mplw.colors = dict(config.items('COLORS'))
-        print('colors', self.mplw.colors)
 
         if  not  config.has_section ('EXTENT')  :
                 config['EXTENT']  =  {"longitude":  35,
@@ -507,6 +365,9 @@ class MplMainWindow(QMainWindow, Ui_MainWindow):
             for _row in range(self.tableViewEditor.model().rowCount(QModelIndex())):
                 self.tableViewEditor.hideRow(_row)
 
+            self.tableViewEditor.reset()
+            #self.displayMaps()
+
     def  saveAs(self):
             fname  =  QFileDialog.getSaveFileName (filter="CSV  File(*.csv);; JSON File(*.json)")
             self.saveFile(fname[0])
@@ -533,7 +394,7 @@ if __name__ == "__main__":
     win = MplMainWindow()
 
 
-    prev, = win.mplw.canvas.axes.plot(34, 31, '.', color='red', markersize=12)
+    prev, = win.mplw.canvas.axes.plot(34, 31, '.', c=numpy.random.random(3), markersize=12)
     #am = animation.FuncAnimation (myFigure, animate, init_func=init, frames=100, interval=588)
     win.displayMaps ()
     win.show()
